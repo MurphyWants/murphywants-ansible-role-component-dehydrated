@@ -1,2 +1,94 @@
 ---
-# TODO
+- name: Install dehydrated & jq
+  ansible.builtin.apt:
+    name:
+      - dehydrated
+      - jq
+    state: latest
+
+- name: Create folders
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  loop:
+    - "{{ DEHYDRATED_CONFIG_BASEDIR }}"
+    - "{{ DEHYDRATED_CONFIG_BASEDIR }}/conf.d"
+    - "{{ DEHYDRATED_CONFIG_BASEDIR }}/hook.d"
+    - "{{ DEHYDRATED_CONFIG_BASEDIR }}/certs"
+
+# TODO: create lockfile
+
+- name: Deploy hook.sh
+  ansible.builtin.template: 
+    src: "{{ role_path }}/templates/hook.sh.j2"
+    dest: "{{ DEHYDRATED_CONFIG_BASEDIR }}/hook.sh"
+    owner: root
+    group: root
+    mode: '0700'
+    backup: yes
+
+- name: Deploy config
+  ansible.builtin.template: 
+    src: "{{ role_path }}/templates/config.j2"
+    dest: "{{ DEHYDRATED_CONFIG_BASEDIR }}/config"
+    owner: root
+    group: root
+    mode: '0700'
+    backup: yes
+
+- name: Deploy cloudflare hook
+  ansible.builtin.template: 
+    src: "{{ role_path }}/templates/hook.d/hook_cloudflare.sh.j2"
+    dest: "{{ DEHYDRATED_CONFIG_BASEDIR }}/hook.d/hook_cloudflare.sh"
+    owner: root
+    group: root
+    mode: '0700'
+    backup: yes
+  when:
+    - DEHYDRATED_HOOK_CLOUDFLATE_API_KEY is defined
+    - DEHYDRATED_HOOK_CLOUDFLATE_DEPLOY_BOOL
+
+- name: Clean (delete) domains.txt
+  ansible.builtin.file:
+    path: "{{ DEHYDRATED_CONFIG_BASEDIR }}/domains.txt"
+    state: absent
+  when:
+    - DEHYDRATED_DOMAINS_LIST_CLEAN
+
+- name: Touch domains.txt
+  ansible.builtin.file:
+    path: "{{ DEHYDRATED_CONFIG_BASEDIR }}/domains.txt"
+    state: touch
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Add all domains to domains.txt
+  ansible.builtin.lineinfile:
+    path: "{{ DEHYDRATED_CONFIG_BASEDIR }}/domains.txt"
+    backup: true
+    state: present
+    line: " {{ item }} "
+    search_string: " {{ item }} "
+  with_items: "{{ DEHYDRATED_DOMAINS_LIST }}"
+
+- name: Add dehydrated cron job
+  ansible.builtin.cron:
+    special_time: daily
+    name: Generate certs
+    job: "dehydrated -c"
+
+- name: "Run dehydrated: Register and accept terms"
+  ansible.builtin.command:
+    cmd: "dehydrated --register --accept-terms"
+  check_mode: false
+  diff: false
+
+- name: "Run dehydrated: Generate certs"
+  ansible.builtin.command:
+    cmd: "dehydrated -c"
+  check_mode: false
+  diff: false
